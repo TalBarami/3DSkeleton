@@ -3,6 +3,7 @@ from typing import Dict, Any
 
 import matplotlib.pyplot as plt
 import neptune.new as neptune
+import comet_ml
 from tqdm import tqdm
 
 
@@ -104,3 +105,23 @@ class NeptuneLogger(PrintLogger):
 
     def _save_param(self, name: str, data: Any):
         self.run[name] = data
+
+class CometLogger(PrintLogger):
+    def __init__(self, project_name, api_key, workspace, **kwargs):
+        super(CometLogger, self).__init__(**kwargs)
+        self.run = comet_ml.Experiment(project_name=project_name, api_key=api_key, workspace=workspace)
+
+    def _log(self, name: str, data: Any):
+        self.run.log_metric(name=name, value=data)
+
+    def log_fig(self, name: str, fig: Any):
+        self.run.log_figure(name, fig)
+
+    def stop(self):
+        self.run.end()
+
+    def upload_model(self, path):
+        raise NotImplementedError()
+
+    def _save_param(self, name: str, data: Any):
+        raise NotImplementedError()

@@ -1,3 +1,7 @@
+import sys
+sys.path.append(r'/mnt/DS_SHARED/users/talb/projects/3DSkeleton')
+sys.path.append(r'/mnt/DS_SHARED/users/talb/projects/MeshUtils')
+
 import h5py
 import numpy as np
 from os import path as osp
@@ -9,9 +13,9 @@ import seaborn as sns
 from mesh_segmentation.training.inference import Segmentor
 from tqdm import tqdm
 
-from skeletons.skeleton_layout import SkeletonLayout
-from utility.constants import DataPaths
-from utility.plot3d import plot_3d_point_cloud
+from skeletons_3d.layout import SkeletonLayout
+from mesh_utils.utility.constants import DataPaths
+from mesh_utils.utility.plot3d import plot_3d_point_cloud
 
 
 class Reconstructor:
@@ -133,23 +137,25 @@ def plot_spine(pts, a, b, frac):
     ax.plot_surface(xx, yy, z)
 
 
-def plot_results(pc, org_segments, predicted_segments, skeleton, reconstructed_skeleton):
-    fig = plt.figure(figsize=(15, 15))
-    ax = fig.add_subplot(221, projection='3d')
-    plot_3d_point_cloud(pc.T[0], pc.T[1], pc.T[2], org_segments, axis=ax, show=False, title='Manual Segments')
-    ax = fig.add_subplot(222, projection='3d')
-    plot_3d_point_cloud(pc.T[0], pc.T[1], pc.T[2], predicted_segments, axis=ax, show=False, title='Predicted Segments')
-    ax = fig.add_subplot(223, projection='3d')
-    plot_3d_point_cloud(skeleton.T[0], skeleton.T[1], skeleton.T[2], axis=ax, show=False, title='Ground Truth Skeleton')
-    ax = fig.add_subplot(224, projection='3d')
-    plot_3d_point_cloud(reconstructed_skeleton.T[0], reconstructed_skeleton.T[1], reconstructed_skeleton.T[2], axis=ax, show=True, title='Skeleton Reconstruction')
+def plot_results(pc, org_segments, predicted_segments, skeleton, reconstructed_skeleton, skeleton_layout):
+    fig = plt.figure(figsize=(16, 8), dpi=256)
+    ax = fig.add_subplot(121, projection='3d')
+    plot_3d_point_cloud(pc=pc, skeleton=None, segments=org_segments, show=False, title='Manual Segments', axis=ax, skeleton_layout=skeleton_layout)
+    ax = fig.add_subplot(122, projection='3d')
+    plot_3d_point_cloud(pc=pc, skeleton=None, segments=predicted_segments, show=True, title='Predicted Segments', axis=ax, skeleton_layout=skeleton_layout)
+    fig = plt.figure(figsize=(16, 8), dpi=256)
+    ax = fig.add_subplot(121, projection='3d')
+    plot_3d_point_cloud(pc=pc, skeleton=skeleton, segments=predicted_segments, show=False, title='Ground Truth Skeleton', axis=ax, skeleton_layout=skeleton_layout)
+    ax = fig.add_subplot(122, projection='3d')
+    plot_3d_point_cloud(pc=pc, skeleton=reconstructed_skeleton, segments=predicted_segments, show=True, title='Reconstructed Skeleton', axis=ax, skeleton_layout=skeleton_layout)
 
 
 if __name__ == '__main__':
     data = 'test'
     checkpoints_dir = r'/mnt/DS_SHARED/users/talb/projects/3d_avatar_generation/checkpoints'
+    skeleton_layout = SkeletonLayout()
     s = Segmentor(checkpoints_dir)
-    r = Reconstructor(SkeletonLayout())
+    r = Reconstructor(skeleton_layout)
     with h5py.File(osp.join(DataPaths.POINT_CLOUDS_DB, 'segmentation', f'{data}.h5'), "r") as f:
         pcs = np.array(f['point_cloud'])
         faces = np.array(f['faces'])
@@ -158,31 +164,28 @@ if __name__ == '__main__':
     n = len(pcs)
     y_pred = []
     y_true = []
-    nans = []
     for i, (pc, face, skeleton, org_segments) in tqdm(enumerate(zip(pcs, faces, skeletons, segments))):
         mesh = trimesh.Trimesh(vertices=pc, faces=faces)
         predicted_segments = s.predict(mesh)
         reconstructed_skeleton = r.reconstruct(mesh, predicted_segments)
-        if np.any(np.isnan(reconstructed_skeleton)):
-            nans.append(i)
-        else:
-            y_pred.append(reconstructed_skeleton)
-            y_true.append(skeleton)
+        y_pred.append(reconstructed_skeleton)
+        y_true.append(skeleton)
         if (i+1) % 100 == 0:
-            plot_results(pc, org_segments, predicted_segments, skeleton, reconstructed_skeleton)
+            fig = plt.figure(figsize=(16, 8), dpi=240)
+            plot_results(pc, org_segments, predicted_segments, skeleton, reconstructed_skeleton, skeleton_layout=skeleton_layout)
             # break
     y_true = np.array(y_true)
     y_pred = np.array(y_pred)
     diff = y_true - y_pred
-    # diff = np.nan_to_num(y_true - y_pred, nan=2)
     pw_mse = np.square(diff).sum(axis=2).mean(axis=0)
     all_mse = np.mean(pw_mse)
     rmse_norm = np.sqrt(all_mse) * 100 / 2
     joints = ['all'] + list(SkeletonLayout().joints.keys())
-    sns.barplot(x=joints, y=np.concatenate(([all_mse], pw_mse)))
-    plt.xticks(rotation=70)
-    plt.title(f'MSE={np.round(all_mse, 5)}, RMSE (Scaled)={np.round(rmse_norm, 5)}%')
-    plt.tight_layout()
+    fig, ax = plt.subplots(dpi=240)
+    sns.barplot(x=joints, y=np.concatenate(([all_mse], pw_mse)), ax=ax)
+    fig.xticks(rotation=70)
+    fig.title(f'MSE={np.round(all_mse, 5)}, RMSE (Scaled)={np.round(rmse_norm, 5)}%')
+    fig.tight_layout()
     plt.show()
 
         # sns.barplot(x=joints, y=np.concatenate(([all_mse], pw_mse)) * 100 / 2)

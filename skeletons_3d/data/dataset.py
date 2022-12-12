@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-from utility.utils import read_pkl
+from mesh_utils.utility.utils import read_pkl, farthest_point_sample
 
 
 def translate_pointcloud(pointcloud):
@@ -26,8 +26,10 @@ class PartDataset(Dataset):
         return len(self.X)
 
     def __getitem__(self, idx):
-        ids = np.random.choice(len(self.X[idx]), self.num_pts, replace=True)
-        x, y = self.X[idx][ids], np.array([v for v in self.Y[idx].values()]).reshape(-1)
+        x, ids = farthest_point_sample(self.X[idx], self.num_pts)
+        y = np.array([v for v in self.Y[idx].values()]).reshape(-1)
+        # ids = np.random.choice(len(self.X[idx]), self.num_pts, replace=True)
+        # x, y = self.X[idx][ids], np.array([v for v in self.Y[idx].values()]).reshape(-1)
         if self.train:
             # x = translate_pointcloud(x)
             np.random.shuffle(x)
@@ -38,6 +40,7 @@ class PointCloudDataset(Dataset):
         with h5py.File(h5_path, "r") as f:
             self.X = np.array(f['point_cloud'])
             self.Y = np.array(f['skeleton'])
+            self.s = np.array(f['segmentations'])
         self.num_pts = num_pts
         self.train = train
 
@@ -45,12 +48,18 @@ class PointCloudDataset(Dataset):
         return self.X.shape[0]
 
     def __getitem__(self, idx):
-        ids = np.random.choice(len(self.X[idx]), self.num_pts, replace=True)
-        x, y = self.X[idx][ids], self.Y[idx].reshape(-1)
+        x, ids = farthest_point_sample(self.X[idx], self.num_pts)
+        s = self.s[idx][ids].reshape(-1, 1)
+        h = np.zeros((s.size, s.max() + 1))
+        h[np.arange(s.size), s] = 1
+        y = self.Y[idx].reshape(-1)
+        x = np.concatenate((x, h), axis=1)
+        # ids = np.random.choice(len(self.X[idx]), self.num_pts, replace=True)
+        # x, y, s = self.X[idx][ids], self.Y[idx].reshape(-1), self.s[idx][ids]
         if self.train:
             # x = translate_pointcloud(x)
             np.random.shuffle(x)
-        return x, y
+        return torch.tensor(x, dtype=torch.float), y
 
 if __name__ == '__main__':
     data = ['train', 'val', 'test']
